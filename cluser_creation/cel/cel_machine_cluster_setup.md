@@ -263,3 +263,14 @@ Then you can join any number of worker nodes by running the following on each as
 
 kubeadm join 10.126.8.31:6443 --token dr4oth.zfcxykuzx3x7xg87 --discovery-token-ca-cert-hash sha256:8aecf7622a6706c8125c08c323a37356eaa8d533844370af50f5288fd48a0b45
 
+---
+recet everything and run join command again after this below commands
+
+sudo kubeadm reset -f
+sudo rm -rf /etc/cni/net.d
+sudo rm -rf /var/lib/kubelet
+sudo rm -rf /var/lib/containerd
+sudo systemctl restart containerd
+
+---
+
