@@ -233,16 +233,8 @@ sudo rm -rf /etc/kubernetes /var/lib/etcd
 
 ✅ **This document is tested and matches your working setup**
 
-If you want:
 
-* Ubuntu version
-* Automation shell script
-* KT slides
-* Troubleshooting appendix
-
-Just tell me 👍
-
-
+---
 Your Kubernetes control-plane has initialized successfully!
 
 To start using your cluster, you need to run the following as a regular user:
