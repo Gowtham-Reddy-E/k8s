@@ -1,0 +1,59 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV DISPLAY=:1
+
+RUN apt-get update && apt-get install -y \
+    tigervnc-standalone-server \
+    tigervnc-common \
+    openbox \
+    lxpanel \
+    pcmanfm \
+    lxterminal \
+    firefox \
+    xterm \
+    dbus-x11 \
+    fonts-dejavu \
+    ca-certificates \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /root/.vnc
+
+RUN echo "ubuntu" | vncpasswd -f > /root/.vnc/passwd && \
+    chmod 600 /root/.vnc/passwd
+
+RUN cat > /root/.vnc/xstartup << 'EOF'
+#!/bin/sh
+export DISPLAY=:1
+export XDG_RUNTIME_DIR=/tmp/runtime-root
+mkdir -p $XDG_RUNTIME_DIR
+chmod 700 $XDG_RUNTIME_DIR
+
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+
+eval "$(dbus-launch --sh-syntax)"
+
+openbox &
+sleep 2
+lxpanel &
+pcmanfm --desktop &
+
+wait
+EOF
+
+RUN chmod +x /root/.vnc/xstartup
+
+RUN cat > /start.sh << 'EOF'
+#!/bin/bash
+rm -rf /tmp/.X1-lock /tmp/.X11-unix/X1
+vncserver -kill :1 >/dev/null 2>&1 || true
+vncserver :1 -localhost no -geometry 1280x800 -depth 24
+tail -f /root/.vnc/*.log
+EOF
+
+RUN chmod +x /start.sh
+
+EXPOSE 5901
+
+CMD ["/start.sh"]
