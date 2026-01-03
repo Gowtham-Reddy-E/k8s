@@ -1,0 +1,171 @@
+FROM opensuse/leap:15.5
+
+ENV DISPLAY=:1
+
+RUN zypper refresh && zypper install -y \
+    tigervnc \
+    xorg-x11-Xvnc \
+    xorg-x11-server \
+    xorg-x11-fonts-core \
+    xorg-x11-essentials \
+    openbox \
+    lxpanel \
+    pcmanfm \
+    lxterminal \
+    MozillaFirefox \
+    xterm \
+    dbus-1-x11 \
+    dejavu-fonts \
+    ca-certificates \
+    fontconfig \
+    which \
+    procps \
+    util-linux \
+    && zypper clean -a
+
+# Setup D-Bus machine-id
+RUN dbus-uuidgen > /var/lib/dbus/machine-id && \
+    dbus-uuidgen > /etc/machine-id
+
+RUN mkdir -p /root/.vnc
+
+# Set VNC password using multiple methods to ensure compatibility
+RUN echo "opensuse" | vncpasswd -f > /root/.vnc/passwd 2>/dev/null || \
+    (echo "opensuse"; echo "opensuse") | vncpasswd /root/.vnc/passwd || \
+    echo -e "opensuse\nopensuse\n\n" | vncpasswd
+RUN chmod 600 /root/.vnc/passwd
+
+RUN cat > /root/.vnc/xstartup << 'EOF'
+#!/bin/bash
+
+export DISPLAY=:1
+export XDG_RUNTIME_DIR=/tmp/runtime-root
+export XDG_SESSION_TYPE=x11
+
+# Create runtime directory
+mkdir -p $XDG_RUNTIME_DIR
+chmod 700 $XDG_RUNTIME_DIR
+
+# Ensure display is available
+echo "Testing X server connection..."
+for i in {1..30}; do
+    if timeout 5 xset q >/dev/null 2>&1; then
+        echo "X server is ready!"
+        break
+    fi
+    echo "Waiting for X server... ($i/30)"
+    sleep 2
+done
+
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+
+# Start D-Bus session
+eval "$(dbus-launch --sh-syntax)"
+
+echo "Starting desktop environment..."
+
+# Start window manager
+openbox &
+WM_PID=$!
+
+sleep 2
+
+# Start desktop components
+echo "Starting panel and file manager..."
+lxpanel &
+PANEL_PID=$!
+
+pcmanfm --desktop &
+FM_PID=$!
+
+# Wait for window manager
+wait $WM_PID
+EOF
+
+RUN chmod +x /root/.vnc/xstartup
+
+RUN cat > /start.sh << 'EOF'
+#!/bin/bash
+
+# Initialize D-Bus
+mkdir -p /run/dbus
+chown messagebus:messagebus /run/dbus
+dbus-daemon --system --fork
+
+# Clean up any existing VNC processes
+rm -rf /tmp/.X1-lock /tmp/.X11-unix/X1 /root/.vnc/*.pid
+vncserver -kill :1 >/dev/null 2>&1 || true
+
+# Create X11 socket directory
+mkdir -p /tmp/.X11-unix
+chmod 1777 /tmp/.X11-unix
+
+# Check if vncserver exists, otherwise use Xvnc directly
+if command -v vncserver >/dev/null 2>&1; then
+    echo "Starting VNC server using vncserver command..."
+    vncserver :1 -localhost no -geometry 1280x800 -depth 24
+    VNC_LOG="/root/.vnc/$(hostname):1.log"
+else
+    echo "Starting VNC server using Xvnc directly..."
+    # Use Xvnc directly with correct syntax for OpenSUSE
+    Xvnc :1 \
+        -desktop "OpenSUSE Desktop" \
+        -geometry 1280x800 \
+        -depth 24 \
+        -rfbauth /root/.vnc/passwd \
+        -rfbport 5901 \
+        -SecurityTypes VncAuth \
+        -AlwaysShared \
+        > /root/.vnc/Xvnc.log 2>&1 &
+    
+    echo $! > /root/.vnc/Xvnc.pid
+    VNC_LOG="/root/.vnc/Xvnc.log"
+fi
+
+# Wait for X server to start
+sleep 5
+
+# Test if display is available
+echo "Testing display availability..."
+export DISPLAY=:1
+if ! xset q >/dev/null 2>&1; then
+    echo "Warning: Display :1 not ready, waiting longer..."
+    sleep 10
+fi
+
+# Start the desktop session
+echo "Starting desktop environment..."
+/root/.vnc/xstartup &
+
+# Wait for log file and tail it
+echo "Waiting for log files..."
+for i in {1..30}; do
+    if [ -f "$VNC_LOG" ] && [ -s "$VNC_LOG" ]; then
+        echo "Found log file: $VNC_LOG"
+        break
+    fi
+    sleep 1
+done
+
+echo "VNC server should be running on port 5901"
+echo "Connect with VNC viewer to localhost:5901 using password: opensuse"
+
+if [ -f "$VNC_LOG" ]; then
+    tail -f "$VNC_LOG"
+else
+    echo "No log file found, keeping container alive..."
+    # Keep container running and show process status
+    while true; do 
+        echo "VNC processes:"
+        ps aux | grep -E "(vnc|Xvnc)" | grep -v grep
+        sleep 30
+    done
+fi
+EOF
+
+RUN chmod +x /start.sh
+
+EXPOSE 5901
+
+CMD ["/start.sh"]
